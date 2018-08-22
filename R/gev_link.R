@@ -1,42 +1,82 @@
-## Generalized Extreme Value Binomial Regression Link Function
-## (c) Daniel S. Mork 2018
+#' Generalized Extreme Value Binomial Regression Link Function
+#' @author Daniel S. Mork (c)2018
+#'
+#'
+#' @description This function allows for model building where the binomial response
+#' data is very unbalanced. It is recommended to compare
+#' predictive values for a test set of data to best optimize the xi value of the
+#' gev link function. A graphical simulation of this function under different
+#' values of xi is available here: \url{https://www.desmos.com/calculator/mvqzlylab1}.
+#' \cr\cr
+#' The GEV binomial link function is based on the GEV cdf. Parameter
+#' xi modifies the shape of the distribution, with xi = 0 being equivalent to
+#' the \code{cloglog} link available in \code{R}. The link function often throws
+#' errors due to its domain restriction and works better for values of xi < 0 and
+#' when there are a large amount of 0's compared to 1's in the response. Setting
+#' \code{rev=T} will reflect the \code{cloglog} link, reversing the skew of the
+#' distribution.
+#' \cr\cr
+#' This function currently works in \code{glm} and \code{mgcv::bam} for GAMs, but does
+#' not contain all the function needed to work in \code{mgcv::gam}.
+#'
+#'
+#' @param xi Parameter in GEV distribution (negative values produce fewer errors)
+#' @param rev If TRUE, reverses skew when xi = 0
+#'
+#' @return An object of class \code{link-glm}, which has components:\cr
+#' \code{linkfun}  Link function \code{function(mu)} (inverse GEV cdf)\cr
+#' \code{linkinv}  Inverse link function \code{function(eta)} (GEV cdf)\cr
+#' \code{mu.eta}   Derivative of linkinv w.r.t eta \code{function(eta)}\cr
+#' \code{valideta} Specifies domain of linkinv \code{function(eta)}\cr
+#' \code{validmu} Specifies domain of linkfun, mu in (0,1) \code{function(mu)}\cr
+#' \code{initialize} Specifies beginning values of mu and eta \code{expression}
+#'
+#' @export
+#' @references
+#' Wang, X., & Dey, D. K. (2010). Generalized extreme value regression for binary response data:\cr
+#' 	    An application to B2B electronic payments system adoption. The Annals of Applied Statistics, 4(4), 2000-2023.\cr
+#' 	Calabrese, R., & Osmetti, S. A. (2013). Modelling small and medium enterprise loan defaults as rare events:\cr
+#' 	    the generalized extreme value regression model. Journal of Applied Statistics, 40(6), 1172-1188.\cr
+#' 	\url{https://stackoverflow.com/questions/15931403/modify-glm-function-to-adopt-user-specified-link-function-in-r}\cr
+#' 	\url{https://stackoverflow.com/questions/39793085/custom-link-function-works-for-glm-but-not-mgcv-gam}\cr
+#' 	\url{https://stats.stackexchange.com/questions/46523/how-to-simulate-artificial-data-for-logistic-regression/46525}\cr
+#' 	\url{https://gist.github.com/frbl/1411ee1df13154bd22092a7894503eb2#L22}\cr
+#'  R help files for make.link, binomial
+#'
+#' @examples
+#' set.seed(1)
+#' n = 10000
+#' x1 <- rnorm(n)
+#' x2 <- rnorm(n)
+#' x3 <- rnorm(n)
+#' z <- x1 - 2*x2 + x3 - 6 + .05 * rnorm(n) # Shift center, add small noise
+#' fam <- gev(-0.5)    # Specify model
+#' p <- fam$linkinv(z) # Probability value from GEV link
+#' plot(sort(p))
+#' y <- rbinom(n, 1, p)# Draw bernoulli r.v. with prob. p
+#' table(y)/n
+#'
+#' # Fit model with correct GEV parameterization
+#' dat <- data.frame(y = y, x1 = x1, x2 = x2, x3 = x3)
+#' glm(y ~ x1 + x2 + x3, dat, family = binomial(link = fam),
+#'      mustart = rep(mean(y), length(y)))
+#'
+#' # Compare results to logit, probit, cauchit, and gumbel links (logit, cloglog)
+#' glm(y ~ x1 + x2 + x3, dat, family = binomial(link = logit))
+#' glm(y ~ x1 + x2 + x3, dat, family = binomial(link = probit))
+#' glm(y ~ x1 + x2 + x3, dat, family = binomial(link = cauchit))
+#' glm(y ~ x1 + x2 + x3, dat, family = binomial(link = cloglog)) # gev(0)
+#'
+#' # Fit to GEV link with different shape parameters, choose best model with AIC
+#' xi.val <- seq(-1, 0, 0.1)
+#' xi.val[which.min(sapply(xi.val, function(xi) glm(y = x1 + x2, dat,
+#'                                                  family = binomial(link = gev(xi)),
+#'                                                  mustart = rep(mean(y), length(y)))$aic))]
+#'
+#'
+#'
 
-
-## This function allows for model building where bernoulli response data has a
-## very low/high probability of occurance. It is recommended to compare
-## predictive values for a test set of data to best optimize the xi value of the
-## gev link function. A graphical simulation of this function under different
-## values of xi is available here: https://www.desmos.com/calculator/mvqzlylab1
-
-## NOTES:
-## - Currently this link will work with glm and mgcv::bam for GAMs, but needs
-##   additional functions to work with mgcv::gam.
-## - Using rev = T may need to have 'etastart' specified in glm
-
-
-## REF:
-##	- Wang, X., & Dey, D. K. (2010). Generalized extreme value regression for binary response data:
-##	    An application to B2B electronic payments system adoption. The Annals of Applied Statistics, 4(4), 2000-2023.
-##	- Calabrese, R., & Osmetti, S. A. (2013). Modelling small and medium enterprise loan defaults as rare events:
-##	    the generalized extreme value regression model. Journal of Applied Statistics, 40(6), 1172-1188.
-##	- https://stackoverflow.com/questions/15931403/modify-glm-function-to-adopt-user-specified-link-function-in-r
-##	- https://stackoverflow.com/questions/39793085/custom-link-function-works-for-glm-but-not-mgcv-gam
-##  - https://stats.stackexchange.com/questions/46523/how-to-simulate-artificial-data-for-logistic-regression/46525
-##	- https://gist.github.com/frbl/1411ee1df13154bd22092a7894503eb2#L22
-##	- https://github.com/cran/mgcv/blob/master/R/bam.r
-##	- https://github.com/cran/mgcv/blob/master/R/efam.r
-##	- R help files for make.link, binomial
-
-## USE:
-## - Binomial link function based on GEV cdf. Parameter xi modifies shape
-##    of distribution.
-## - xi = 0 => Gumbel (also cloglog link)
-## - rev will reflect the Gumbel distribution over x=0 (i.e. reverses skew)
-## - xi < 0: Use when small amt of 1's compared to 0's
-## - xi > 0: Use when large amt of 1's compared to 0's
-## - Compare parameterizations of with deviance or AIC
-## - glm: add mustart = rep(mean(y), length(y)) {where y is binomial response}
-gev <- function (xi = 0, rev = F) {
+link.gev <- function (xi = 0, rev = F) {
 
   # Link function: Map cumulative probability (mu) to quantile value
   linkfun <- function(mu) {
@@ -103,32 +143,3 @@ gev <- function (xi = 0, rev = F) {
                  initialize = initialize, name = link),
             class = "link-glm")
 }
-
-## Example
-set.seed(1)
-n = 10000
-x1 <- rnorm(n)
-x2 <- rnorm(n)
-x3 <- rnorm(n)
-z <- x1 - 2*x2 + x3 - 6 + .05 * rnorm(n) # Shift center, add small noise
-fam <- gev(-0.5)    # Specify model
-p <- fam$linkinv(z) # Probability value from GEV link
-plot(sort(p))       #
-y <- rbinom(n, 1, p)# Draw bernoulli r.v. with prob. p
-table(y)/n
-
-# Fit model with correct GEV parameterization
-dat <- data.frame(y = y, x1 = x1, x2 = x2, x3 = x3)
-glm(y ~ x1 + x2 + x3, dat, family = binomial(link = fam),
-            mustart = rep(mean(y), length(y)))
-# Compare results to logit, probit, cauchit, and gumbel links (logit, cloglog)
-glm(y ~ x1 + x2 + x3, dat, family = binomial(link = logit))
-glm(y ~ x1 + x2 + x3, dat, family = binomial(link = probit))
-glm(y ~ x1 + x2 + x3, dat, family = binomial(link = cauchit))
-glm(y ~ x1 + x2 + x3, dat, family = binomial(link = cloglog)) # gev(0)
-
-# Fit to GEV link with different shape parameters, choose best model with AIC
-xi.val <- seq(-1, 0, 0.1)
-xi.val[which.min(sapply(xi.val, function(xi) glm(y = x1 + x2, dat,
-                                   family = binomial(link = gev(xi)),
-                                   mustart = rep(mean(y), length(y)))$aic))]
